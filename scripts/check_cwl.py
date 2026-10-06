@@ -62,7 +62,7 @@ def validate(cwltool, path):
     return p.returncode == 0, msg[-6:]
 
 
-def checks(doc, help_text, package):
+def checks(doc, help_text, package, stem=None):
     """(level, code, message) findings; levels ERROR (will fail at run time) and WARN."""
     f = []
     bc = doc.get("baseCommand")
@@ -80,7 +80,9 @@ def checks(doc, help_text, package):
                   "run the installed script directly, or give its full path in the image"))
     if len(words) == 1 and first.rsplit("/", 1)[-1] in INTERPRETERS:
         f.append(("ERROR", "runs_interpreter", f"baseCommand is the bare interpreter {first!r}"))
-    if package and first.startswith(package + "_"):
+    # only when the command IS the file name (samtools_sort.cwl -> `samtools_sort`);
+    # real programs can start with the package name too (agat_convert_sp_gff2bed.pl)
+    if package and first.startswith(package + "_") and (stem is None or first in (stem, doc.get("label"))):
         f.append(("ERROR", "base_command_is_file_name",
                   f"baseCommand {first!r} is the CWL file name, not a program "
                   f"(`{package} {first[len(package) + 1:]}`, or `{first[len(package) + 1:]}`?)"))
@@ -99,13 +101,20 @@ def checks(doc, help_text, package):
         b = s.get("inputBinding") if isinstance(s.get("inputBinding"), dict) else {}
         pre = b.get("prefix")
         ts = types_of(s)
+        t = s.get("type")                                  # prefix on each array item counts too
+        for x in (t if isinstance(t, list) else [t]):
+            if isinstance(x, dict) and isinstance(x.get("inputBinding"), dict) \
+                    and isinstance(x["inputBinding"].get("prefix"), str):
+                prefixes[x["inputBinding"]["prefix"]] += 1
         doc_text = " ".join(str(s.get("doc") or "").split())
         if isinstance(pre, str):
             prefixes[pre] += 1
             if " " in pre.strip():
                 f.append(("ERROR", "prefix_has_space",
                           f"{iid}: prefix {pre!r} is passed as ONE argument; keep only the flag"))
-            if re.search(r"(!|\+|=[sif]|:[sif])$|^-{1,2}\w+\|\w", pre):
+            # `-name+` is a real bedtools flag: a spec only when the help does not print it as is
+            if re.search(r"(!|\+|=[sif]|:[sif])$|^-{1,2}\w+\|\w", pre) and not (
+                    help_text and re.search(r"(?<![\w-])" + re.escape(pre) + r"(?!\S)", help_text)):
                 f.append(("ERROR", "perl_getopt_spec",
                           f"{iid}: prefix {pre!r} is a Perl Getopt spec, not a flag"))
             if pre.strip() in ("--help", "-help", "--version") or (
@@ -124,8 +133,12 @@ def checks(doc, help_text, package):
             f.append(("ERROR", "output_path_is_File",
                       f"{iid}: looks like an output path but is File (must exist before the run); "
                       "make it string and collect the file with an output glob"))
-        if ts == ["Directory"] and re.search(r"(?i)\boutput\b.*\b(dir|directory|folder)\b", doc_text) \
-                and not INPUT_DOC_RE.search(doc_text):
+        # "Output directory" / "Path to the output folder", not "BiG-SCAPE output directory" or
+        # "output directory from baktfold predict" (another tool's output, read here)
+        if ts == ["Directory"] and re.search(
+                r"(?i)^\W*(?:the\s+)?(?:path\s+(?:to|of)\s+(?:the\s+)?)?(?:output|out|results?)\s+(dir|directory|folder)\b"
+                r"|\b(?:write|save|store)\s+(?:\w+\s+){0,3}(?:to|in|into)\s+(?:this\s+|the\s+)?(dir|directory|folder)\b",
+                doc_text) and not INPUT_DOC_RE.search(doc_text) and not re.search(r"(?i)\bfrom\s+\w", doc_text):
             f.append(("ERROR", "output_dir_is_Directory",
                       f"{iid}: output directory typed Directory (staged read-only); use string"))
         if any(t.endswith("[]") for t in ts) and isinstance(s.get("inputBinding"), dict) \
@@ -135,7 +148,12 @@ def checks(doc, help_text, package):
             for x in (t if isinstance(t, list) else [t]):
                 if isinstance(x, dict) and isinstance(x.get("inputBinding"), dict):
                     item_b = x["inputBinding"]
-            if not item_b:
+            # argparse nargs (`--tracks TRACKS [TRACKS ...]`, `--in A B ...`): one flag, many values
+            # (`--tracks [t1 ...]`, `--dimensions px px`)
+            q = re.escape(pre)
+            nargs = help_text and re.search(q + r"[ =]\S+ \[\S+ \.\.\.\]|" + q + r"[ =]\S+ (?:\S+ )?\.\.\.|"
+                                            + q + r"[ =]\[\S+ \.\.\.\]|" + q + r"[ =](\S+) \1(?!\S)", help_text)
+            if not item_b and not nargs:
                 f.append(("WARN", "array_prefix_once",
                           f"{iid}: array with prefix {pre} renders `{pre} a b c`; if the tool wants "
                           f"`{pre} a {pre} b`, put the prefix on the items' inputBinding"))
@@ -152,6 +170,8 @@ def checks(doc, help_text, package):
             if len(names) > 1 and bound & set(names):
                 bound |= set(names)
         def covered(flag):
+            if flag.endswith("-"):                        # `--initial-` cut at a line wrap, `--kallisto-fastx-*`
+                return True
             if re.match(r"^-[A-Za-z]\d", flag):          # -q2, -k14: a value glued in an example
                 return flag[:2] in bound
             if re.match(r"^-[A-Za-z]{2,}$", flag):        # -mu, -TdBOELU: bundled single-letter switches
@@ -165,16 +185,23 @@ def checks(doc, help_text, package):
     if help_text:
         usage = re.search(r"(?im)^\s*usage:?\s*(.+(?:\n[ \t]{6,}.+)*)", help_text)
         if usage:
-            line = re.sub(r"\[[^\[\]]*\]", " ", usage.group(1))   # drop optional [ ... ] parts
+            line = re.sub(r"^\s*\S+", " ", usage.group(1), count=1)  # the program name (`ASTRAL`) is no slot
+            line = re.sub(r"\[[^\[\]]*\]", " ", line)   # drop optional [ ... ] parts
             line = re.sub(r"\[[^\[\]]*\]", " ", line)
             line = re.sub(r"(<[^<>]+>)(?:\s*\|\s*<[^<>]+>)+", r"\1", line)  # <in.fq>|<in.fa> is one slot
+            # `(-i|--input) <input file>`: alternatives of one flag, then its value
+            line = re.sub(r"\((-{1,2}[A-Za-z][\w-]*(?:\|-{1,2}[A-Za-z][\w-]*)*)\)\s*(<[^<>]+>|[A-Z][A-Z0-9_]+)",
+                          lambda m: m.group(1).split("|")[0], line)
+            # a metavar after a flag (-i INPUT, --out=<file>) is the flag's value, not a positional
+            line = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z][\w-]*)[ =](<[^<>]+>|[A-Z][A-Z0-9_]+)", r"\1", line)
             required_slots = re.findall(r"<[^<>]+>|(?<![\w-])[A-Z][A-Z0-9_]{2,}(?![\w-])", line)
             required_slots = [x for x in required_slots if x not in ("OPTIONS", "OPTION", "COMMAND", "ARGS")]
             positional_required = [
                 iid for iid, s in ins
                 if isinstance(s.get("inputBinding"), dict) and not s["inputBinding"].get("prefix")
-                and "null" not in (s.get("type") if isinstance(s.get("type"), list) else [s.get("type")])
-                and not str(s.get("type")).endswith("?") and "default" not in s]
+                and ("default" in s       # a positional with a default is always passed
+                     or ("null" not in (s.get("type") if isinstance(s.get("type"), list) else [s.get("type")])
+                         and not str(s.get("type")).endswith("?")))]
             # an output name built in `arguments` (no prefix) also fills a usage slot
             positional_required += [f"arguments[{i}]" for i, a in enumerate(doc.get("arguments") or [])
                                     if isinstance(a, dict) and "prefix" not in a and "position" in a]
@@ -220,7 +247,7 @@ def main():
     except yaml.YAMLError as e:
         print(f"[yaml] cannot parse: {e}")
         sys.exit(1)
-    findings = checks(doc, help_text, a.package) if isinstance(doc, dict) else []
+    findings = checks(doc, help_text, a.package, path.name[:-4]) if isinstance(doc, dict) else []
     for level, code, m in findings:
         print(f"[{level}] {code}: {m}")
     errors = sum(1 for l, _, _ in findings if l == "ERROR")

@@ -17,6 +17,7 @@ Containers run with a clean environment and an empty home (/home/user): the host
 import argparse
 import json
 import os
+import time
 import re
 import shutil
 import subprocess
@@ -166,18 +167,25 @@ def run(engine, image, argv, cache, timeout):
     # isatty(stdin); with a pipe they wait for data on stdin and print nothing
     master, slave = os.openpty()
     argv = container_cmd(engine, image, argv, cache)
+    name = None
     if engine == "docker":
-        argv.insert(2, "-i")
+        # a named container: killing the client on timeout leaves the container running
+        # (a server command such as `auspice view` never exits), so remove it by name
+        name = f"cwl-help-{os.getpid()}-{time.monotonic_ns()}"
+        argv[2:2] = ["-i", "--name", name]
     try:
         p = subprocess.run(argv, stdin=slave, capture_output=True, timeout=timeout,
                            env=env_for(cache), cwd="/tmp")
     except subprocess.TimeoutExpired:
+        if name:
+            subprocess.run(["docker", "rm", "-f", name], capture_output=True)
         return None, "timeout"
     finally:
         os.close(slave)
         os.close(master)
     out = (p.stdout + p.stderr).decode("utf-8", errors="replace")
-    return p.returncode, ANSI_RE.sub("", ENGINE_LOG_RE.sub("", out)).strip()
+    # colour codes first: a coloured "INFO:" line would not match the engine-log pattern
+    return p.returncode, ENGINE_LOG_RE.sub("", ANSI_RE.sub("", out)).strip()
 
 
 def build(engine, image, cache, timeout=1800):

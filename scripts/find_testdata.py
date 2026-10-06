@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Find real test data for a tool in its own source repository (and other public test sets).
+r"""Find real test data for a tool in its own source repository (and other public test sets).
 
   find_testdata.py PACKAGE                       # list candidate files from the tool's GitHub repo
   find_testdata.py PACKAGE --repo owner/name     # skip repo lookup
   find_testdata.py PACKAGE --get 'test/*.fa' 'test/r1.fq' --out testdata
   find_testdata.py PACKAGE --galaxy              # also list Galaxy tools-iuc test-data
+  find_testdata.py PACKAGE --nfcore /path/to/test-datasets --search 'sarscov2/genome/genome\.fasta$'
+                                                 # nf-core/test-datasets (local clone, all branches)
 
 Sources, in order:
   1. The bioconda recipe (bioconda-recipes/recipes/PACKAGE/meta.yaml): its `test: commands`
@@ -119,6 +121,55 @@ def list_galaxy(package):
     return sorted(out, key=lambda f: (f["size"], f["path"]))
 
 
+def nfcore_index(clone):
+    """(branch, size, path) for every file on every branch of a local nf-core/test-datasets
+    clone; cached in <clone>/.git/cwl-testdata-index.tsv (rebuilt when refs change)."""
+    import subprocess
+    git = ["git", "-C", str(clone)]
+    cache = Path(clone) / ".git" / "cwl-testdata-index.tsv"
+    refs = subprocess.run(git + ["for-each-ref", "--format=%(refname:short) %(objectname)", "refs/remotes"],
+                          capture_output=True, text=True).stdout
+    stamp = str(abs(hash(refs)))
+    if cache.exists() and cache.read_text().split("\n", 1)[0] == stamp:
+        rows = cache.read_text().split("\n")[1:]
+    else:
+        rows = []
+        for line in refs.splitlines():
+            ref = line.split()[0]
+            if ref.endswith("/HEAD"):
+                continue
+            out = subprocess.run(git + ["ls-tree", "-r", "-l", ref], capture_output=True, text=True).stdout
+            for t in out.splitlines():
+                meta, path = t.split("\t", 1)
+                parts = meta.split()
+                if parts[1] == "blob":
+                    rows.append(f"{ref}\t{parts[3]}\t{path}")
+        cache.write_text(stamp + "\n" + "\n".join(rows))
+    return [r.split("\t") for r in rows if r]
+
+
+def list_nfcore(clone, pattern, max_mb):
+    """Matches of a regex over 'branch:path' in nf-core/test-datasets: a local clone (all
+    branches) or, without one, the GitHub tree of the shared `modules` branch."""
+    rx = re.compile(pattern or ".", re.I)
+    out = []
+    if clone:
+        for ref, size, path in nfcore_index(clone):
+            branch = ref.split("/", 1)[-1]
+            key = f"{branch}:{path}"
+            if rx.search(key) and 0 < int(size) <= max_mb * 1e6:
+                out.append({"path": f"nfcore:{key}", "size": int(size), "ref": ref, "file": path,
+                            "clone": str(clone)})
+    else:
+        tree = fetch("https://api.github.com/repos/nf-core/test-datasets/git/trees/modules?recursive=1") or {}
+        for t in tree.get("tree", []):
+            key = f"modules:{t.get('path')}"
+            if t.get("type") == "blob" and rx.search(key) and 0 < t.get("size", 0) <= max_mb * 1e6:
+                out.append({"path": f"nfcore:{key}", "size": t["size"],
+                            "url": f"https://raw.githubusercontent.com/nf-core/test-datasets/modules/{t['path']}"})
+    return sorted(out, key=lambda f: (f["size"], f["path"]))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("package")
@@ -128,6 +179,11 @@ def main():
     ap.add_argument("--limit", type=int, default=60, help="files to list")
     ap.add_argument("--get", nargs="+", metavar="GLOB", help="download listed files matching these globs")
     ap.add_argument("--out", default="testdata", help="download folder")
+    ap.add_argument("--nfcore", nargs="?", const="", metavar="CLONE",
+                    help="also search nf-core/test-datasets: a local clone (all branches), or with no "
+                         "value the GitHub 'modules' branch")
+    ap.add_argument("--search", metavar="REGEX", help="with --nfcore: regex over 'branch:path' "
+                                                      "(e.g. 'modules:.*sarscov2/genome/genome\\.fasta$')")
     a = ap.parse_args()
 
     rec = recipe(a.package)
@@ -148,6 +204,12 @@ def main():
         g = list_galaxy(a.package)
         print(f"[galaxy] tools-iuc/tools/{a.package}/test-data: {len(g)} files")
         files += g
+    if a.nfcore is not None:
+        clone = Path(a.nfcore) if a.nfcore else None
+        n = list_nfcore(clone, a.search, a.max_mb)
+        print(f"[nf-core] {'local clone ' + str(clone) if clone else 'GitHub modules branch'}"
+              f"{' matching ' + repr(a.search) if a.search else ''}: {len(n)} files")
+        files += n
     for f in files[:a.limit]:
         print(f"  {f['size']:>9,d}  {f['path']}")
     if len(files) > a.limit:
@@ -164,9 +226,16 @@ def main():
         sys.exit("no listed file matches --get")
     for f in chosen:
         dest = out / Path(f["path"].split(":", 1)[-1]).name
-        req = urllib.request.Request(f["url"], headers={"User-Agent": "find-testdata"})
-        with urllib.request.urlopen(req, timeout=120) as r:
-            dest.write_bytes(r.read())
+        if f.get("clone"):                   # local clone: read the blob, no checkout
+            import subprocess
+            blob = subprocess.run(["git", "-C", f["clone"], "show", f"{f['ref']}:{f['file']}"],
+                                  capture_output=True, check=True).stdout
+            dest.write_bytes(blob)
+            f["url"] = f"https://github.com/nf-core/test-datasets/blob/{f['ref'].split('/', 1)[-1]}/{f['file']}"
+        else:
+            req = urllib.request.Request(f["url"], headers={"User-Agent": "find-testdata"})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                dest.write_bytes(r.read())
         print(f"[get] {f['path']} -> {dest} ({dest.stat().st_size:,d} B)")
     manifest = out / "sources.json"
     old = json.loads(manifest.read_text()) if manifest.exists() else []

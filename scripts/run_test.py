@@ -125,12 +125,49 @@ def check_outputs(tool, result):
                 rows.append((oid, "value", json.dumps(v)[:60]))
                 continue
             p = Path(re.sub(r"^file://", "", v.get("location", v.get("path", ""))))
+            if v["class"] == "Directory":
+                files = [f for f in p.rglob("*") if f.is_file()] if p.is_dir() else []
+                size = sum(f.stat().st_size for f in files)
+                status = "ok" if files else "EMPTY"
+                bad += status == "EMPTY" and not optional
+                rows.append((oid, status, f"{p.name}/ {len(files)} files, {size} B"))
+                continue
             size = v.get("size", p.stat().st_size if p.is_file() else 0)
-            status = "ok" if (v["class"] == "Directory" or size > 0) else "EMPTY"
+            status = "ok" if size > 0 else "EMPTY"
             bad += status == "EMPTY" and not optional
             sec = [Path(re.sub(r"^file://", "", s.get("location", ""))).name for s in v.get("secondaryFiles", [])]
             rows.append((oid, status, f"{p.name} {size} B" + (f" + {', '.join(sec)}" if sec else "")))
     return rows, bad
+
+
+def tool_command(log, image):
+    """The command line cwltool ran inside the container, from its log (after the image)."""
+    m = re.search(r"\[job [^\]]+\][^\n]*\$ (.*?)(?=\n\S|\Z)", log, re.S)
+    if not m:
+        return ""
+    words = [w.strip().rstrip("\\").strip() for w in m.group(1).splitlines()]
+    words = [w for w in words if w]
+    start = 0
+    for i, w in enumerate(words):
+        if w.endswith(".sif") or (image and w == image):
+            start = i + 1
+    words = [re.sub(r"/var/lib/cwl/stg[\w-]+/", "", w) for w in words[start:]]
+    words = [re.sub(r"^/var/spool/cwl/", "", w) for w in words]
+    cmd = " ".join(words)
+    return re.sub(r"(2?[<>])\s*\S*/([^/\s]+)", r"\1 \2", cmd)   # host paths of redirects -> file name
+
+
+def markdown(path, status, cwl, job, cmd, rows, tail, engine):
+    lines = [f"- **Status**: {status}", f"- **Engine**: cwltool --{engine}" if engine != "docker" else
+             "- **Engine**: cwltool (Docker)", "- **Job**:", "```yaml", yaml.safe_dump(job, sort_keys=False).strip(),
+             "```"]
+    if cmd:
+        lines += ["- **Command run**:", "```text", cmd, "```"]
+    if rows:
+        lines += ["- **Outputs**:"] + [f"  - `{oid}`: {st} {detail}".rstrip() for oid, st, detail in rows]
+    if tail:
+        lines += ["- **Log tail**:", "```text", *tail, "```"]
+    Path(path).write_text("\n".join(lines) + "\n")
 
 
 def main():
@@ -142,6 +179,7 @@ def main():
     ap.add_argument("--timeout", type=int, default=3600)
     ap.add_argument("--cwltool", default="cwltool")
     ap.add_argument("--lint-only", action="store_true")
+    ap.add_argument("--markdown", help="also write a Markdown record of the run (job, command, outputs) here")
     a = ap.parse_args()
     cwl, job_path = Path(a.cwl).resolve(), Path(a.job).resolve()
     tool = yaml.safe_load(cwl.read_text())
@@ -176,10 +214,16 @@ def main():
         result = json.loads(p.stdout) if p.stdout.strip() else {}
     except json.JSONDecodeError:
         result = {}
+    image = str(((tool.get("hints") or {}) if isinstance(tool.get("hints"), dict) else {}).get(
+        "DockerRequirement", {}).get("dockerPull", ""))
+    cmd = tool_command(p.stderr, image)
     if p.returncode != 0:
         print(f"[run] FAILED (exit {p.returncode}); log: {out / 'cwltool.log'}")
         tail = [l for l in p.stderr.splitlines() if l.strip()][-25:]
         print("\n".join("    " + l for l in tail))
+        if a.markdown:
+            clean = [re.sub(r"\x1b\[[0-9;]*m", "", l)[:200] for l in tail[-12:]]
+            markdown(a.markdown, f"FAIL (exit {p.returncode})", cwl, job, cmd, [], clean, a.engine)
         for rx, hint in HINTS:
             if re.search(rx, p.stderr, re.I):
                 print(f"[hint] {hint}")
@@ -188,6 +232,11 @@ def main():
     print(f"[run] success; outputs in {out / 'results'}")
     for oid, status, detail in rows:
         print(f"    {oid:28s} {status:18s} {detail}")
+    if cmd:
+        print(f"[run] command: {cmd}")
+    if a.markdown:
+        markdown(a.markdown, "ran; outputs " + ("incomplete" if bad else "present and non-empty"),
+                 cwl, job, cmd, rows, [], a.engine)
     sys.exit(1 if bad else 0)
 
 

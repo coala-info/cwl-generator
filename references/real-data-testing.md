@@ -13,7 +13,7 @@ Validation proves the file is well-formed. Only a run proves the command line is
 
 Real data from the tool's own sources beats anything synthetic: authors pick inputs that
 exercise the tool, and some sets come with expected outputs. Look in this order
-(`scripts/find_testdata.py PACKAGE --galaxy` covers 1–3):
+(`scripts/find_testdata.py PACKAGE --galaxy --nfcore [CLONE]` covers 1–4):
 
 1. The tool's GitHub repository: `test/`, `tests/`, `example(s)/`, `data/`, `demo/`,
    `inst/extdata/` (R). samtools has hundreds of small files in `test/`.
@@ -24,9 +24,15 @@ exercise the tool, and some sets come with expected outputs. Look in this order
    (`diff <(cat out.tsv) <(grep -v '^#' expected.out)`) before calling it a mismatch.
 3. The bioconda recipe (`bioconda-recipes/recipes/<tool>/meta.yaml`): its `test: commands`
    show real invocations.
-4. Shared sets: nf-core/test-datasets (per-pipeline branches with small FASTQ, BAM, VCF and
-   references), and the tool's documentation tutorials.
-5. Only when none fits, the synthetic set below.
+4. nf-core/test-datasets: its `modules` branch is a shared set of small real files that agree
+   with each other (SARS-CoV-2 and human: genome FASTA + .fai/.dict/GFF/GTF, Illumina,
+   nanopore and PacBio reads, BAM/CRAM, VCF, BED, 10x data, small kraken/pangolin
+   databases); other branches hold per-pipeline data. With a local clone,
+   `find_testdata.py PKG --nfcore /path/to/test-datasets --search 'REGEX'` searches every
+   branch (`branch:path`) and `--get` extracts files with `git show`; without a clone,
+   `--nfcore` lists the `modules` branch from GitHub.
+5. The tool's documentation tutorials.
+6. Only when none fits, the synthetic set below.
 
 Record where each file came from (`find_testdata.py --get` writes `sources.json`).
 

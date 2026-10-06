@@ -63,6 +63,8 @@ marked (auto); the rest need a look at the help. Check your own files against th
 | Prefix outputs not collected | `-o PREFIX` writes `PREFIX.bam`, `PREFIX.log` | One output with `glob: $(inputs.prefix)*`, or one per known suffix |
 | Output index mismatch | glob `x.vcf.gz` with `secondaryFiles: .idx` | GATK writes `.tbi` for `.vcf.gz`, `.idx` for `.vcf`: match the name |
 | Output written outside the output dir | tool writes beside its input | `InitialWorkDirRequirement` with `writable: true`, or pass an output path |
+| Small float rendered as `0` | cwltool 3.1.20230425 – 3.2.x prints a `float`/`double` value below `1e-6` (`1e-8`, `1.5e-7`) as `0`, from a job file or a `default` (cwltool issue #2104) | Not a CWL error: use cwltool ≥ 3.3.20260925135507, which prints `0.00000001`. Do not rewrite the CWL; a `valueFrom: $(String(self))` workaround gives `1e-8`, which some tools cannot parse |
+| Directory output has a link into the image | `Input object failed validation: No such file ... /usr/local/...` after the tool succeeded (abeona leaves `out/assemble.nf` linked to the image copy) | `ShellCommandRequirement` and an argument `&& rm -f $(inputs.out_dir)/<link>` at a high position (runs only on success) |
 
 ## 5. Help-text problems that poison generation
 

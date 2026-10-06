@@ -106,7 +106,8 @@ python scripts/run_test.py seqtk_comp.cwl tests/seqtk_comp.yml --engine singular
 
 Prefer real test data from the tool's own sources: the test/example folders of its GitHub
 repository, Galaxy's curated test-data (which often includes the expected output: compare
-with it), and the bioconda recipe's test commands. Use `make_testdata.py testdata` only when
+with it), the bioconda recipe's test commands, and nf-core/test-datasets (`--nfcore [CLONE]
+--search REGEX`; its `modules` branch has small consistent genome, reads, BAM and VCF sets). Use `make_testdata.py testdata` only when
 none fits. Draft the job with `make_job.py`, fill its TODOs from the help (output names,
 required values), and check every pick (arrays as YAML lists, output names as strings).
 `run_test.py` lints the job, runs cwltool in `cwl-test-<tool>/`, and checks that every
