@@ -82,7 +82,9 @@ def checks(doc, help_text, package, stem=None):
         f.append(("ERROR", "runs_interpreter", f"baseCommand is the bare interpreter {first!r}"))
     # only when the command IS the file name (samtools_sort.cwl -> `samtools_sort`);
     # real programs can start with the package name too (agat_convert_sp_gff2bed.pl)
-    if package and first.startswith(package + "_") and (stem is None or first in (stem, doc.get("label"))):
+    # ... unless the captured help shows the program exists (art_454, art_SOLiD in the art image)
+    if package and first.startswith(package + "_") and (stem is None or first in (stem, doc.get("label"))) \
+            and not (help_text and re.search(r"(?i)\busage\b", help_text)):
         f.append(("ERROR", "base_command_is_file_name",
                   f"baseCommand {first!r} is the CWL file name, not a program "
                   f"(`{package} {first[len(package) + 1:]}`, or `{first[len(package) + 1:]}`?)"))
@@ -117,8 +119,9 @@ def checks(doc, help_text, package, stem=None):
                     help_text and re.search(r"(?<![\w-])" + re.escape(pre) + r"(?!\S)", help_text)):
                 f.append(("ERROR", "perl_getopt_spec",
                           f"{iid}: prefix {pre!r} is a Perl Getopt spec, not a flag"))
-            if pre.strip() in ("--help", "-help", "--version") or (
-                    pre.strip() in ("-h", "-v", "-V") and ts == ["boolean"]
+            # `--version <pkg version>` is a real option in some tools (anchore-cli, ariba getref)
+            if pre.strip() in ("--help", "-help") or (
+                    pre.strip() in ("-h", "-v", "-V", "--version") and ts == ["boolean"]
                     and re.search(r"(?i)\b(help|version|usage)\b", doc_text)):
                 f.append(("WARN", "meta_option_input", f"{iid}: {pre} only prints help/version"))
             if help_text and " " not in pre.strip():
@@ -195,7 +198,8 @@ def checks(doc, help_text, package, stem=None):
             # a metavar after a flag (-i INPUT, --out=<file>) is the flag's value, not a positional
             line = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z][\w-]*)[ =](<[^<>]+>|[A-Z][A-Z0-9_]+)", r"\1", line)
             required_slots = re.findall(r"<[^<>]+>|(?<![\w-])[A-Z][A-Z0-9_]{2,}(?![\w-])", line)
-            required_slots = [x for x in required_slots if x not in ("OPTIONS", "OPTION", "COMMAND", "ARGS")]
+            required_slots = [x for x in required_slots if x not in ("OPTIONS", "OPTION", "COMMAND", "ARGS")
+                              and not x.startswith("<-")]   # clap `<--variant <V>|--all>`: one of these flags
             positional_required = [
                 iid for iid, s in ins
                 if isinstance(s.get("inputBinding"), dict) and not s["inputBinding"].get("prefix")
