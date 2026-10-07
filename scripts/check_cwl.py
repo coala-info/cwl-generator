@@ -193,11 +193,11 @@ def checks(doc, help_text, package, stem=None):
             line = re.sub(r"\[[^\[\]]*\]", " ", line)
             line = re.sub(r"(<[^<>]+>)(?:\s*\|\s*<[^<>]+>)+", r"\1", line)  # <in.fq>|<in.fa> is one slot
             # `(-i|--input) <input file>`: alternatives of one flag, then its value
-            line = re.sub(r"\((-{1,2}[A-Za-z][\w-]*(?:\|-{1,2}[A-Za-z][\w-]*)*)\)\s*(<[^<>]+>|[A-Z][A-Z0-9_]+)",
+            line = re.sub(r"\((-{1,2}[A-Za-z0-9][\w-]*(?:\|-{1,2}[A-Za-z0-9][\w-]*)*)\)\s*(<[^<>]+>|[A-Z][A-Z0-9_]+)",
                           lambda m: m.group(1).split("|")[0], line)
             # a metavar after a flag (-i INPUT, --out=<file>) is the flag's value, not a positional
             # (`\s+`: argparse wraps a long usage line between a flag and its value name)
-            line = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z][\w-]*)(?:=|\s+)(<[^<>]+>|[A-Z][A-Z0-9_]+)", r"\1", line)
+            line = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z0-9][\w-]*)(?:=|\s+)(<[^<>]+>|[A-Z][A-Z0-9_]+)", r"\1", line)
             required_slots = re.findall(r"<[^<>]+>|(?<![\w-])[A-Z][A-Z0-9_]{2,}(?![\w-])", line)
             required_slots = [x for x in required_slots
                               if x.strip("<>").lower() not in ("options", "option", "command", "args", "flags")
