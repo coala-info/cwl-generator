@@ -196,9 +196,11 @@ def checks(doc, help_text, package, stem=None):
             line = re.sub(r"\((-{1,2}[A-Za-z][\w-]*(?:\|-{1,2}[A-Za-z][\w-]*)*)\)\s*(<[^<>]+>|[A-Z][A-Z0-9_]+)",
                           lambda m: m.group(1).split("|")[0], line)
             # a metavar after a flag (-i INPUT, --out=<file>) is the flag's value, not a positional
-            line = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z][\w-]*)[ =](<[^<>]+>|[A-Z][A-Z0-9_]+)", r"\1", line)
+            # (`\s+`: argparse wraps a long usage line between a flag and its value name)
+            line = re.sub(r"(?<![\w-])(-{1,2}[A-Za-z][\w-]*)(?:=|\s+)(<[^<>]+>|[A-Z][A-Z0-9_]+)", r"\1", line)
             required_slots = re.findall(r"<[^<>]+>|(?<![\w-])[A-Z][A-Z0-9_]{2,}(?![\w-])", line)
-            required_slots = [x for x in required_slots if x not in ("OPTIONS", "OPTION", "COMMAND", "ARGS")
+            required_slots = [x for x in required_slots
+                              if x.strip("<>").lower() not in ("options", "option", "command", "args", "flags")
                               and not x.startswith("<-")]   # clap `<--variant <V>|--all>`: one of these flags
             positional_required = [
                 iid for iid, s in ins
