@@ -132,7 +132,10 @@ def checks(doc, help_text, package, stem=None):
             if pre.endswith("=") and b.get("separate", True) is not False:
                 f.append(("ERROR", "equals_prefix_separate",
                           f"{iid}: prefix {pre!r} needs separate: false (else `{pre} value`)"))
-        if ts in (["File"],) and OUTPUT_DOC_RE.search(doc_text) and not INPUT_DOC_RE.search(doc_text):
+        # "Output file of the gumbel method" / "output from step 1" is another tool's output, read here
+        if ts in (["File"],) and OUTPUT_DOC_RE.search(doc_text) and not INPUT_DOC_RE.search(doc_text) \
+                and not re.search(r"(?i)\boutput\s+(?:file\s+)?(?:from\s+\w|of\s+(?:the\s+|an?\s+)?(?:[\w-]+\s+){0,4}"
+                                  r"(?:analysis|method|step|tool|run|command|program)\b)|\b(?:created|produced|generated|written|made)\s+by\b", doc_text):
             f.append(("ERROR", "output_path_is_File",
                       f"{iid}: looks like an output path but is File (must exist before the run); "
                       "make it string and collect the file with an output glob"))
@@ -141,7 +144,8 @@ def checks(doc, help_text, package, stem=None):
         if ts == ["Directory"] and re.search(
                 r"(?i)^\W*(?:the\s+)?(?:path\s+(?:to|of)\s+(?:the\s+)?)?(?:output|out|results?)\s+(dir|directory|folder)\b"
                 r"|\b(?:write|save|store)\s+(?:\w+\s+){0,3}(?:to|in|into)\s+(?:this\s+|the\s+)?(dir|directory|folder)\b",
-                doc_text) and not INPUT_DOC_RE.search(doc_text) and not re.search(r"(?i)\bfrom\s+\w", doc_text):
+                doc_text) and not INPUT_DOC_RE.search(doc_text) and not re.search(r"(?i)\bfrom\s+\w|\bin place\b|\b(?:created|produced|generated|written|made)\s+by\b", doc_text) \
+                and not re.search(r"inputs\." + re.escape(iid) + r"\b[\s\S]{0,200}writable:\s*true", str(doc.get("requirements"))):
             f.append(("ERROR", "output_dir_is_Directory",
                       f"{iid}: output directory typed Directory (staged read-only); use string"))
         if any(t.endswith("[]") for t in ts) and isinstance(s.get("inputBinding"), dict) \
