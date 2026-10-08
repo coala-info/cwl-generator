@@ -136,7 +136,8 @@ def checks(doc, help_text, package, stem=None):
         # "Output file of the gumbel method" / "output from step 1" is another tool's output, read here
         if ts in (["File"],) and OUTPUT_DOC_RE.search(doc_text) and not INPUT_DOC_RE.search(doc_text) \
                 and not re.search(r"(?i)\boutput\s+(?:file\s+)?(?:from\s+\w|of\s+(?:the\s+|an?\s+)?(?:[\w-]+\s+){0,4}"
-                                  r"(?:analysis|method|step|tool|run|command|program)\b)|\b(?:created|produced|generated|written|made)\s+by\b", doc_text):
+                                  r"(?:analysis|method|step|tool|run|command|program)\b)|\b(?:created|produced|generated|written|made)\s+by\b", doc_text) \
+                and not re.search(r"\b[Oo]utput (?:file )?(?:of|from) [A-Z][\w.-]*", doc_text):  # "Output file of STAR-Fusion"
             f.append(("ERROR", "output_path_is_File",
                       f"{iid}: looks like an output path but is File (must exist before the run); "
                       "make it string and collect the file with an output glob"))
