@@ -122,7 +122,8 @@ def checks(doc, help_text, package, stem=None):
             # `--version <pkg version>` is a real option in some tools (anchore-cli, ariba getref)
             if pre.strip() in ("--help", "-help") or (
                     pre.strip() in ("-h", "-v", "-V", "--version") and ts == ["boolean"]
-                    and re.search(r"(?i)\b(help|version|usage)\b", doc_text)):
+                    and re.search(r"(?i)\b(help|version|usage)\b", doc_text)
+                    and not re.search(r"(?i)\b(verbos\w*|logging|log level|debug)\b", doc_text)):
                 f.append(("WARN", "meta_option_input", f"{iid}: {pre} only prints help/version"))
             if help_text and " " not in pre.strip():
                 bare = pre.rstrip("=")
