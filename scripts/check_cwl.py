@@ -22,6 +22,17 @@ from pathlib import Path
 
 import yaml
 
+
+class Yaml12Loader(yaml.SafeLoader):
+    """CWL is YAML 1.2: only true/false are booleans (PyYAML's 1.1 reads `id: yes` as True)."""
+
+
+Yaml12Loader.yaml_implicit_resolvers = {
+    k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:bool"]
+    for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()}
+Yaml12Loader.add_implicit_resolver("tag:yaml.org,2002:bool", re.compile(r"^(?:true|True|TRUE|false|False|FALSE)$"),
+                                   list("tTfF"))
+
 INTERPRETERS = {"perl", "python", "python2", "python3", "Rscript", "R", "bash", "sh", "ruby", "node"}
 SYSTEM_UTILITIES = set("""ls cat less more head tail grep sed awk sort uniq cut tr wc find xargs du df
 chmod chown ln rm cp mv mkdir touch man top ps ip ifconfig traceroute which env echo tar gzip
@@ -141,7 +152,7 @@ def checks(doc, help_text, package, stem=None):
                           f"{iid}: prefix {pre!r} needs separate: false (else `{pre} value`)"))
         # "Output file of the gumbel method" / "output from step 1" is another tool's output, read here
         if ts in (["File"],) and OUTPUT_DOC_RE.search(doc_text) and not INPUT_DOC_RE.search(doc_text) \
-                and not re.search(r"(?i)\boutput\s+(?:file\s+)?(?:from\s+\w|of\s+(?:the\s+|an?\s+)?(?:[\w-]+\s+){0,4}"
+                and not re.search(r"(?i)\boutput\s+(?:[\w-]+\s+){0,2}(?:from\s+\w|of\s+(?:the\s+|an?\s+)?(?:[\w-]+\s+){0,4}"
                                   r"(?:analysis|method|step|tool|run|command|program)\b)|\b(?:created|produced|generated|written|made)\s+by\b", doc_text) \
                 and not re.search(r"\b[Oo]utput (?:file )?(?:of|from) [A-Z][\w.-]*", doc_text):  # "Output file of STAR-Fusion"
             f.append(("ERROR", "output_path_is_File",
@@ -261,7 +272,7 @@ def main():
     for m in ([] if ok else msg):
         print("    " + m)
     try:
-        doc = yaml.safe_load(text)
+        doc = yaml.load(text, Loader=Yaml12Loader)
     except yaml.YAMLError as e:
         print(f"[yaml] cannot parse: {e}")
         sys.exit(1)
