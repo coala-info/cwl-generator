@@ -164,7 +164,7 @@ def checks(doc, help_text, package, stem=None):
                 r"(?i)^\W*(?:the\s+)?(?:path\s+(?:to|of)\s+(?:the\s+)?)?(?:output|out|results?)\s+(dir|directory|folder)\b"
                 r"|\b(?:write|save|store)\s+(?:\w+\s+){0,3}(?:to|in|into)\s+(?:this\s+|the\s+)?(dir|directory|folder)\b",
                 doc_text) and not INPUT_DOC_RE.search(doc_text) and not re.search(r"(?i)\bfrom\s+\w|\bin place\b|\b(?:created|produced|generated|written|made)\s+by\b", doc_text) \
-                and not re.search(r"inputs\." + re.escape(iid) + r"\b[\s\S]{0,200}writable:\s*true", str(doc.get("requirements"))):
+                and not re.search(r"inputs\." + re.escape(iid) + r"\b[\s\S]{0,200}writable'?\s*:\s*[Tt]rue", str(doc.get("requirements"))):
             f.append(("ERROR", "output_dir_is_Directory",
                       f"{iid}: output directory typed Directory (staged read-only); use string"))
         if any(t.endswith("[]") for t in ts) and isinstance(s.get("inputBinding"), dict) \
