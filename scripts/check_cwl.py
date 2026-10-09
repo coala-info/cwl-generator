@@ -127,7 +127,10 @@ def checks(doc, help_text, package, stem=None):
                 f.append(("WARN", "meta_option_input", f"{iid}: {pre} only prints help/version"))
             if help_text and " " not in pre.strip():
                 bare = pre.rstrip("=")
-                if not re.search(r"(?<![\w-])" + re.escape(bare) + r"(?![\w-])", help_text):
+                # HyPhy-style help lists option names without dashes ("  alignment  ...") and has no --flags
+                dashless = bare.startswith("--") and not re.search(r"(?<![\w-])--\w", help_text) and \
+                    re.search(r"(?m)^\s*" + re.escape(bare[2:]) + r"(?![\w-])", help_text)
+                if not dashless and not re.search(r"(?<![\w-])" + re.escape(bare) + r"(?![\w-])", help_text):
                     f.append(("WARN", "flag_not_in_help",
                               f"{iid}: {pre} is not in the help (invented, or wrong dash count/spelling?)"))
             if pre.endswith("=") and b.get("separate", True) is not False:
