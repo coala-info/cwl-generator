@@ -84,7 +84,10 @@ def checks(doc, help_text, package, stem=None):
     # real programs can start with the package name too (agat_convert_sp_gff2bed.pl)
     # ... unless the captured help shows the program exists (art_454, art_SOLiD in the art image)
     if package and first.startswith(package + "_") and (stem is None or first in (stem, doc.get("label"))) \
-            and not (help_text and re.search(r"(?i)\busage\b", help_text)):
+            and not (help_text and (re.search(r"(?i)\busage\b", help_text)
+                                    or (re.search(r"(?<![\w-])" + re.escape(first) + r"(?![\w-])", help_text)
+                                        and not re.search(r"(?i)not found|no such file|executable file|cannot (run|exec)",
+                                                          help_text)))):
         f.append(("ERROR", "base_command_is_file_name",
                   f"baseCommand {first!r} is the CWL file name, not a program "
                   f"(`{package} {first[len(package) + 1:]}`, or `{first[len(package) + 1:]}`?)"))
